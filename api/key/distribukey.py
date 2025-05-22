@@ -70,29 +70,36 @@ def distribukey():
     400:
       description: Lose some data
   """
-  if request.method == 'POST':
-
-    certificate = request.form.get('certificate', None)
-    allowed_users = list(set(request.form.get('allowedUsers', None).split(',')))
-    type = request.form.get('keyType', None)
-    if certificate is None or type is None:
-      return standard_response(
-        success=False,
-        message='Lose some data',
-        code=400
-      )
-    
-    cert = x509.load_pem_x509_certificate(certificate.encode('utf-8'), default_backend())
-    try:
-      cert.verify_directly_issued_by(CA_CERTIFICATE)
-    except Exception as e:
-      return standard_response(
-        success=False,
-        message=e,
-        code=401
-      )
+  certificate = request.form.get('certificate', None)
+  allowed_users = list(set(request.form.get('allowedUsers', None).split(',')))
+  type = request.form.get('keyType', None)
+  if certificate is None or type is None:
+    return standard_response(
+      success=False,
+      message='Lose some data',
+      code=400
+    )
+  
+  cert = x509.load_pem_x509_certificate(certificate.encode('utf-8'), default_backend())
+  try:
+    cert.verify_directly_issued_by(CA_CERTIFICATE)
+  except Exception as e:
+    return standard_response(
+      success=False,
+      message=e,
+      code=401
+    )
+  cert_owner = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
     
   users = [x for x in allowed_users if not Users.query.filter_by(name=x).first() is None]
+
+  if not cert_owner in users:
+    return standard_response(
+      success=False,
+      message='Error certificate owner',
+      code=401
+    )
+
   result = Keys.query.join(Keys.users) \
                       .filter(Users.name.in_(users)) \
                       .group_by(Keys.id) \
