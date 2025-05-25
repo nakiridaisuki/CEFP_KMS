@@ -3,7 +3,7 @@ from flask import (
     request,
 )
 from api.extention import limiter, db
-from api.utils import standard_response
+from api.utils import standard_response, server_sign
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
@@ -66,7 +66,7 @@ def distribukey():
     required: true
   responses:
     200:
-      description: Return the key
+      description: Return the key and new certificate
     400:
       description: Lose some data
   """
@@ -89,16 +89,32 @@ def distribukey():
       message=e,
       code=401
     )
+
   cert_owner = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+  cert_user: Users = Users.query.filter_by(name=cert_owner).first()
+  if(int(cert_user.serial_number) != cert.serial_number):
+    return standard_response(
+      success=False,
+      message='Error certificate serial number',
+      code=401
+    )
     
   users = [x for x in allowed_users if not Users.query.filter_by(name=x).first() is None]
-
   if not cert_owner in users:
     return standard_response(
       success=False,
       message='Error certificate owner',
       code=401
     )
+  
+  subject = cert.subject
+  public_key = cert.public_key()
+  serial_number = x509.random_serial_number()
+  new_cert = server_sign(subject, public_key, serial_number)
+
+  key = public_key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+  cert_user.update(public_key=key, serial_number=serial_number)
+  db.session.commit()
 
   result = Keys.query.join(Keys.users) \
                       .filter(Users.name.in_(users)) \
@@ -122,7 +138,8 @@ def distribukey():
       message='Generated a new key',
       data={
         'keyID': data.id,
-        'key': key
+        'key': key,
+        'certificate': new_cert.public_bytes(serialization.Encoding.PEM).decode()
       }
     )
   
@@ -135,7 +152,8 @@ def distribukey():
     message='key already exist',
     data={
       'keyID': result.id,
-      'key': key
+      'key': key,
+      'certificate': new_cert.public_bytes(serialization.Encoding.PEM).decode()
     }
   )
     
