@@ -39,21 +39,16 @@ def generateKey() -> Keys:
     public_key=pub_pem,
   )
 
-@distribukey_api.route('/api/key/distributeKey/', methods=['POST'])
+@distribukey_api.route('/api/key/public/', methods=['POST'])
 @limiter.limit('10 per minute')
-def distribukey():
+def getPublicKey():
   """
-  Get private or public key
+  Get public key with allowed users
   ---
   tags:
       - Generate Key
   produces: application/json
   parameters:
-  - name: keyType
-    in: formData
-    type: string
-    enum: [public, private]
-    required: true
   - name: allowedUsers
     in: formData
     type: array
@@ -72,8 +67,7 @@ def distribukey():
   """
   certificate = request.form.get('certificate', None)
   allowed_users = list(set(request.form.get('allowedUsers', None).split(',')))
-  type = request.form.get('keyType', None)
-  if certificate is None or type is None:
+  if certificate is None:
     return standard_response(
       success=False,
       message='Lose some data',
@@ -129,30 +123,101 @@ def distribukey():
     db.session.add(data)
     db.session.commit()
 
-    if type == 'public':
-      key = data.public_key
-    elif type == 'private':
-      key = data.private_key
-
     return standard_response(
       message='Generated a new key',
       data={
         'keyID': data.id,
-        'key': key,
+        'key': data.public_key,
         'certificate': new_cert.public_bytes(serialization.Encoding.PEM).decode()
       }
     )
-  
-  if type == 'public':
-    key = result.public_key
-  elif type == 'private':
-    key = result.private_key
     
   return standard_response(
     message='key already exist',
     data={
       'keyID': result.id,
-      'key': key,
+      'key': result.public_key,
+      'certificate': new_cert.public_bytes(serialization.Encoding.PEM).decode()
+    }
+  )
+    
+@distribukey_api.route('/api/key/private/', methods=['POST'])
+@limiter.limit('10 per minute')
+def getPrivateKey():
+  """
+  Get private key with key's Id
+  ---
+  tags:
+      - Generate Key
+  produces: application/json
+  parameters:
+  - name: KeyId
+    in: formData
+    type: array
+    items:
+      type: integer
+    required: true
+  - name: certificate
+    in: formData
+    type: string
+    required: true
+  responses:
+    200:
+      description: Return the key and new certificate
+    400:
+      description: Lose some data
+  """
+  certificate = request.form.get('certificate', None)
+  keyID = request.form.get('keyId', None)
+  if certificate is None or keyID is None:
+    return standard_response(
+      success=False,
+      message='Lose some data',
+      code=400
+    )
+  keyID = int(keyID)
+  
+  cert = x509.load_pem_x509_certificate(certificate.encode('utf-8'), default_backend())
+  try:
+    cert.verify_directly_issued_by(CA_CERTIFICATE)
+  except Exception as e:
+    return standard_response(
+      success=False,
+      message=e,
+      code=401
+    )
+
+  cert_owner = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+  cert_user: Users = Users.query.filter_by(name=cert_owner).first()
+  if(int(cert_user.serial_number) != cert.serial_number):
+    return standard_response(
+      success=False,
+      message='Error certificate serial number',
+      code=401
+    )
+  
+  subject = cert.subject
+  public_key = cert.public_key()
+  serial_number = x509.random_serial_number()
+  new_cert = server_sign(subject, public_key, serial_number)
+
+  key = public_key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+  cert_user.update(public_key=key, serial_number=serial_number)
+  db.session.commit()
+
+  result = Keys.query.filter_by(id=keyID).first()
+
+  if result is None:
+    return standard_response(
+      success=False,
+      message='Error key id',
+      code=400
+    )
+    
+  return standard_response(
+    message='key already exist',
+    data={
+      'key': result.private_key,
       'certificate': new_cert.public_bytes(serialization.Encoding.PEM).decode()
     }
   )
