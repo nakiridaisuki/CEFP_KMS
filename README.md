@@ -4,7 +4,7 @@
 
 ## 使用方式
 
-這個專案使用 [uv](https://docs.astral.sh/uv/) 來管理 python 環境
+這個專案使用 [uv](https://docs.astral.sh/uv/) 來管理 python 環境\
 使用：
 ```
 uv run app.py

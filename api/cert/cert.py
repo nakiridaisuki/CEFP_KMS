@@ -33,6 +33,10 @@ def gencert():
     in: formData
     type: string
     required: true
+  - name: certificate
+    in: formData
+    type: string
+    required: false
   responses:
     200:
       description: Return a certificate
@@ -76,13 +80,30 @@ def gencert():
     username = subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
     
     user: Users = Users.query.filter_by(name=username).first()
-    if(not user is None and user.user_public_key == key):
-      if (int(timestamp) - user.last_query_time) < TIME_WINDOW_SECOND:
-        return standard_response(
-          success=False,
-          message='Request too many times',
-          code=403
-        )
+    if user is not None:
+      if user.user_public_key == key:
+        if (int(timestamp) - user.last_query_time) < TIME_WINDOW_SECOND:
+          return standard_response(
+            success=False,
+            message='Request too many times',
+            code=403
+          )
+      else:
+        certificate = request.form.get('certificate', None)
+        if certificate is None:
+          return standard_response(
+            success=False,
+            message='Lose some data',
+            code=400
+          )
+        old_cert = x509.load_pem_x509_certificate(certificate.encode('utf-8'), default_backend())
+        old_cert_owner = old_cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+        if old_cert_owner != username:
+          return standard_response(
+            success=False,
+            message='Error certificate owner',
+            code=401
+          )
     
     serial_number = x509.random_serial_number()
     cert = server_sign(subject, public_key, serial_number)
