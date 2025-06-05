@@ -4,6 +4,14 @@
 
 ## 使用方式
 
+### CA 自簽憑證
+需要先使用 openssl 等工具生成 CA 的憑證，例如：
+```
+openssl genpkey -algorithm RSA -out keys/ca.key -pkeyopt rsa_keygen_bits:2048 -nodes
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout keys/ca.key -out keys/ca.crt -subj "/C=TW/ST=Taiwan/L=Hsinchu City/O=MyCompany/OU=IT Department/CN=localhost"
+```
+
+### 運行
 這個專案使用 [uv](https://docs.astral.sh/uv/) 來管理 python 環境\
 使用：
 ```
